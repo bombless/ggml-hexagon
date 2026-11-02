@@ -37,6 +37,11 @@ if (GGML_HEXAGON_USE_MEMPOOL)
 
     set_target_properties(ggml_htp PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+    # QAIC-generated stubs and Qualcomm's FARF headers use the GNU comma-swallowing
+    # variadic-macro extension; keep that third-party/generated warning local to this target.
+    target_compile_options(ggml_htp PRIVATE
+        $<$<C_COMPILER_ID:Clang>:-Wno-gnu-zero-variadic-macro-arguments>)
+
     target_include_directories(ggml_htp PUBLIC
         ${HEXAGON_SDK_ROOT}/incs
         ${HEXAGON_SDK_ROOT}/incs/stddef
@@ -81,6 +86,7 @@ if (GGML_HEXAGON_USE_MEMPOOL)
         ExternalProject_Add(htp-mempool-${V}
             SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/htp BUILD_ALWAYS ON
             CMAKE_ARGS
+                -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
                 -DCMAKE_BUILD_TYPE=${GGML_HEXAGON_HTP_BUILD_TYPE}
                 -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/htp/cmake-toolchain.cmake
                 -DCMAKE_INSTALL_LIBDIR=${CMAKE_BINARY_DIR}/bin
@@ -156,6 +162,7 @@ else()
         ExternalProject_Add(htp-${V}
             SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/htp BUILD_ALWAYS ON
             CMAKE_ARGS
+                -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
                 -DCMAKE_BUILD_TYPE=${GGML_HEXAGON_HTP_BUILD_TYPE}
                 -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/htp/cmake-toolchain.cmake
                 -DCMAKE_INSTALL_LIBDIR=${CMAKE_CURRENT_BINARY_DIR}
