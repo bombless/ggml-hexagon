@@ -6868,7 +6868,13 @@ static void ggml_backend_hexagon_buffer_set_tensor(ggml_backend_buffer_t buffer,
 
     if (is_repack) {
         bool loaded_from_cache = false;
-        if (tensor->type == GGML_TYPE_Q4_0 && offset == 0 && size == ggml_nbytes(tensor)) {
+        const bool cacheable_type = tensor->type == GGML_TYPE_Q4_0 || tensor->type == GGML_TYPE_Q4_1 ||
+                                    tensor->type == GGML_TYPE_Q4_K || tensor->type == GGML_TYPE_Q5_K;
+        const char * cache_data = static_cast<const char *>(tensor->data);
+        const char * cache_base = static_cast<const char *>(hctx->rpc_mempool);
+        const char * cache_end = cache_base + static_cast<ptrdiff_t>(hctx->rpc_mempool_len);
+        if (cacheable_type && cache_data >= cache_base && cache_data < cache_end &&
+            offset == 0 && size == ggml_nbytes(tensor)) {
             struct TiledCacheState {
                 std::mutex mutex;
                 bool initialized = false;
@@ -6935,9 +6941,10 @@ static void ggml_backend_hexagon_buffer_set_tensor(ggml_backend_buffer_t buffer,
                         entry.ne[3] != static_cast<uint64_t>(tensor->ne[3])) {
                         continue;
                     }
+                    const uint64_t tile_bytes = tensor->type == GGML_TYPE_Q4_1 ? 640 : 576;
                     const uint64_t expected_size =
                         ((static_cast<uint64_t>(tensor->ne[0]) + 31) / 32) *
-                        ((static_cast<uint64_t>(tensor->ne[1]) + 31) / 32) * 576 *
+                        ((static_cast<uint64_t>(tensor->ne[1]) + 31) / 32) * tile_bytes *
                         static_cast<uint64_t>(tensor->ne[2]) * static_cast<uint64_t>(tensor->ne[3]);
                     if (entry.size != expected_size || entry.offset > static_cast<uint64_t>(INT64_MAX)) break;
                     cache.file.clear();
