@@ -28,7 +28,7 @@ VERBOSE=OFF
 VERBOSE=ON
 
 #running path on Android phone
-REMOTE_PATH=/data/local/tmp
+REMOTE_PATH=/data/local/ggml-hexagon
 
 #path of built artifacts
 LOCAL_BUILD_DIR=${PROJECT_ROOT_PATH}/out/ggmlhexagon-android
@@ -375,11 +375,11 @@ function build_arm64
     # Step 1: PGO_GENERATE=1 build (run workload on device, profiles written to PGO_DIR on device)
     # PGO_GENERATE=1  ./scripts/build-run-ggmlhexagon-android.sh build
     # Step 2: Pull profiles from device to host, then PGO_USE=1 rebuild
-    # adb pull /data/local/tmp/pgo ./pgo-data
+    # adb pull /data/local/ggml-hexagon/pgo ./pgo-data
     # PGO_USE=1 ./scripts/build-run-android.sh build
     local pgo_flags=""
     if [ "${PGO_GENERATE}" = "1" ]; then
-        PGO_DIR="${PGO_DIR:-/data/local/tmp/pgo}"
+        PGO_DIR="${PGO_DIR:-/data/local/ggml-hexagon/pgo}"
         pgo_flags="-fprofile-generate=${PGO_DIR} -fno-profile-use"
         echo "[PGO] Instrumented build: profiles will be written to ${PGO_DIR} on device"
         echo "[PGO] After running workload, pull profiles: adb pull ${PGO_DIR} <host_dir>"
@@ -534,7 +534,7 @@ function build_armcpu()
     /bin/cp -fv ${LOCAL_BUILD_DIR}/bin/libmtmd.so                  ${PROJECT_ROOT_PATH}/out/ab-test/libmtmd-cpuonly.so
     /bin/cp -fv ${LOCAL_BUILD_DIR}/bin/libllama-bench-impl.so      ${PROJECT_ROOT_PATH}/out/ab-test/libllama-bench-impl-cpuonly.so
 
-    # fix issue CANNOT LINK EXECUTABLE "/data/local/tmp/llama-completion": library "libggml-hexagon.so" not found: needed by main executable
+    # fix issue CANNOT LINK EXECUTABLE "/data/local/ggml-hexagon/llama-completion": library "libggml-hexagon.so" not found: needed by main executable
     /bin/cp -fv ${LOCAL_BUILD_DIR}/bin/llama-bench                 ${PROJECT_ROOT_PATH}/out/ab-test/llama-bench-cpuonly
     /bin/cp -fv ${LOCAL_BUILD_DIR}/bin/llama-completion            ${PROJECT_ROOT_PATH}/out/ab-test/llama-completion-cpuonly
     /bin/cp -fv ${LOCAL_BUILD_DIR}/bin/llama-server                ${PROJECT_ROOT_PATH}/out/ab-test/llama-server-cpuonly
@@ -600,6 +600,7 @@ function build_ggml_hexagon_dspqueue()
 #push dspqueue-variant DSP skels (libggml-htp-vXX.so) to the device
 function prepare_dspqueue_skels()
 {
+    adb shell "mkdir -p ${REMOTE_PATH}"
     for ver in ${HTP_ARCH_VERSIONS}; do
         case "$ver" in
             v73 | v75 | v79 | v81)
@@ -618,6 +619,7 @@ function prepare_dspqueue_skels()
 #push mempool/FastRPC-variant DSP skels (libggml-htp-vXX.so) to the device
 function prepare_fastrpc_skels()
 {
+    adb shell "mkdir -p ${REMOTE_PATH}"
     if [ -f ${PROJECT_ROOT_PATH}/scripts/ggml-hexagon.cfg ]; then
         adb push ${PROJECT_ROOT_PATH}/scripts/ggml-hexagon.cfg ${REMOTE_PATH}/ggml-hexagon.cfg
     fi
@@ -764,6 +766,7 @@ function commit_so_file_md5() {
 # while dspqueue DSP skels are still on device leaves an AP/DSP mismatch.
 function update_ggml_libs()
 {
+    adb shell "mkdir -p ${REMOTE_PATH}"
     #adb push ${LOCAL_BUILD_DIR}/bin/*.so ${REMOTE_PATH}/
     adb push ${LOCAL_BUILD_DIR}/bin/libggml-base.so                 ${REMOTE_PATH}/
     adb push ${LOCAL_BUILD_DIR}/bin/libggml-cpu.so                  ${REMOTE_PATH}/
@@ -874,7 +877,7 @@ function update_cpu_libs()
     adb push ${ab_test_dir}/libmtmd-cpuonly.so                  ${REMOTE_PATH}/libmtmd.so
     adb push ${ab_test_dir}/libllama-bench-impl-cpuonly.so      ${REMOTE_PATH}/libllama-bench-impl.so
 
-    # fix issue CANNOT LINK EXECUTABLE "/data/local/tmp/llama-completion": library "libggml-hexagon.so" not found: needed by main executable
+    # fix issue CANNOT LINK EXECUTABLE "/data/local/ggml-hexagon/llama-completion": library "libggml-hexagon.so" not found: needed by main executable
     # because there is a different linker procedure for Android‑CPU‑only builds
     /bin/cp -f ${ab_test_dir}/llama-bench-cpuonly               ${LOCAL_BUILD_DIR}/bin/llama-bench
     /bin/cp -f ${ab_test_dir}/llama-completion-cpuonly          ${LOCAL_BUILD_DIR}/bin/llama-completion
@@ -936,9 +939,9 @@ function prepare_run_on_phone()
         adb push ${LOCAL_BUILD_DIR}/bin/${program} ${REMOTE_PATH}/
         adb shell ls -l ${REMOTE_PATH}/libggml-*.so
         adb shell chmod +x ${REMOTE_PATH}/${program}
-        adb shell "rm -f /data/local/tmp/${program}.farf"
-        adb shell "touch /data/local/tmp/${program}.farf"
-        adb shell "echo 0x1c > /data/local/tmp/${program}.farf"
+        adb shell "rm -f /data/local/ggml-hexagon/${program}.farf"
+        adb shell "touch /data/local/ggml-hexagon/${program}.farf"
+        adb shell "echo 0x1c > /data/local/ggml-hexagon/${program}.farf"
         return
     fi
 
@@ -980,9 +983,9 @@ function prepare_run_on_phone()
         fi
         if [ ${need_update} -eq 0 ]; then
             #host-side MD5 matches cache, but verify libs actually exist on device
-            #(user may have wiped /data/local/tmp manually, leaving host-side MD5 cache stale)
+            #(user may have wiped /data/local/ggml-hexagon manually, leaving host-side MD5 cache stale)
             if ! adb shell ls ${REMOTE_PATH}/libggml-cpu.so >/dev/null 2>&1; then
-                printf "device-side libggml-cpu.so missing (maybe /data/local/tmp was wiped), force update ggml libs\n\n"
+                printf "device-side libggml-cpu.so missing (maybe /data/local/ggml-hexagon was wiped), force update ggml libs\n\n"
                 need_update=1
             fi
         fi
@@ -1032,9 +1035,9 @@ function prepare_run_on_phone()
     # 0x1c = HIGH+ERROR+FATAL (drop LOW+MEDIUM verbose spam; keep diag)
     # 0x18 = ERROR+FATAL  (only errors)
     # 0x00 = silent
-    adb shell "rm -f /data/local/tmp/${program}.farf"
-    adb shell "touch /data/local/tmp/${program}.farf"
-    adb shell "echo 0x1c > /data/local/tmp/${program}.farf"
+    adb shell "rm -f /data/local/ggml-hexagon/${program}.farf"
+    adb shell "touch /data/local/ggml-hexagon/${program}.farf"
+    adb shell "echo 0x1c > /data/local/ggml-hexagon/${program}.farf"
     #observe cDSP's log
     #adb logcat  | grep "CDSP0"
 }
@@ -1194,7 +1197,7 @@ function run_llamacli_all()
 function run_stresstest()
 {
     local prompt_file="${PROJECT_ROOT_PATH}/scripts/prompt_long_cinema.txt"
-    local remote_prompt="/data/local/tmp/prompt_long.txt"
+    local remote_prompt="/data/local/ggml-hexagon/prompt_long.txt"
     local model_path="/sdcard/gemma-4-E4B_q4_0-it.gguf"
 
     if [ ! -f "${prompt_file}" ]; then
