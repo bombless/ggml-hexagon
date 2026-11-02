@@ -8288,9 +8288,9 @@ static enum ggml_status ggmlhexagon_backend_graph_compute_batch(ggml_backend_t b
                                     n_mul_mat_qkv++;
                                     ctx->n_fused_qkv_cum++;
                                     GGMLHEXAGON_LOG_DEBUG("DBG QKV fusion: q=%s k=%s v=%s | Wq[t%d] Wk[t%d] Wv[t%d] x[t%d] | Q[t%d] K[t%d] V[t%d]",
-                                                             n_q->name ? n_q->name : "?",
-                                                             n_k->name ? n_k->name : "?",
-                                                             n_v->name ? n_v->name : "?",
+                                                             n_q->name,
+                                                             n_k->name,
+                                                             n_v->name,
                                                              wq_idx, op_k->src_idx[0], op_v->src_idx[0], x_idx,
                                                              q_dst, op_k->dst_idx[0], op_v->dst_idx[0]);
                                     continue;
@@ -8345,8 +8345,8 @@ static enum ggml_status ggmlhexagon_backend_graph_compute_batch(ggml_backend_t b
                                 n_mul_mat_ffn++;
                                 ctx->n_fused_ffn_cum++;
                                 GGMLHEXAGON_LOG_DEBUG("DBG FFN fusion: gate=%s up=%s | Wgate[t%d] y[t%d] Wup[t%d] | gate[t%d] up[t%d]",
-                                                          n_gate->name ? n_gate->name : "?",
-                                                          n_up->name ? n_up->name : "?",
+                                                          n_gate->name,
+                                                          n_up->name,
                                                           wgate_idx, y_idx, next.src_idx[0],
                                                           op.dst_idx[0], next.dst_idx[0]);
                                 continue;
