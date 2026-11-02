@@ -636,6 +636,57 @@ static void repack_q8_0_tiled(ggml_tensor * t, const void * data, size_t offset,
         });
 }
 
+void htp_repack_q4_0_tiled_range(ggml_tensor * t, const void * data, size_t offset, size_t size) {
+    repack_q4_0_tiled(t, data, offset, size);
+}
+
+void htp_repack_q4_1_tiled_range(ggml_tensor * t, const void * data, size_t offset, size_t size) {
+    repack_q4_1_tiled(t, data, offset, size);
+}
+
+void htp_repack_q8_0_tiled_range(ggml_tensor * t, const void * data, size_t offset, size_t size) {
+    repack_q8_0_tiled(t, data, offset, size);
+}
+
+void htp_repack_q4_0_tile_from_blocks(const void * src_blocks, void * dst_tile,
+                                      int64_t ne0, int64_t ne1, int ct, int kt) {
+    const auto * src = static_cast<const block_q4_0 *>(src_blocks);
+    auto * dst = static_cast<uint8_t *>(dst_tile);
+    const int64_t row_stride = ne0 / QK4_0;
+    auto * scale_dst = reinterpret_cast<ggml_half *>(dst + 512);
+
+#if defined(__ARM_NEON) || defined(__aarch64__)
+    if (ct * 32 + 32 <= ne1 && kt < row_stride) {
+        for (int row0 = 0; row0 < 32; row0 += 8) {
+            const uint8_t * qs[8];
+            for (int rr = 0; rr < 8; ++rr) {
+                const block_q4_0 * block = src + (ct * 32 + row0 + rr) * row_stride + kt;
+                qs[rr] = block->qs;
+            }
+            repack_neon_4bit_rows(qs, dst, row0);
+        }
+        for (int row = 0; row < 32; ++row) {
+            scale_dst[row] = src[(ct * 32 + row) * row_stride + kt].d;
+        }
+        return;
+    }
+#endif
+
+    uint8_t tile_quants[32][32];
+    for (int row = 0; row < 32; ++row) {
+        const int64_t r = ct * 32 + row;
+        if (r < ne1 && kt < row_stride) {
+            const block_q4_0 & block = src[r * row_stride + kt];
+            unpack_nibbles_32(tile_quants[row], block.qs);
+            scale_dst[row] = block.d;
+        } else {
+            memset(tile_quants[row], 8, 32);
+            scale_dst[row] = 0;
+        }
+    }
+    transpose_nibbles_to_tile(dst, tile_quants);
+}
+
 static void repack_tiled_q8_0(void * data, const ggml_tensor * t, size_t offset, size_t size) {
     unpack_from_tiled_grid_32<block_q8_0, 1>(data, t, offset, size, HTP_TENSOR_TILE_SIZE_Q8_0,
         [](block_q8_0 * dst_slice, const uint8_t * tile_src, int64_t ne0, int64_t start_row, int64_t end_row, int64_t row_stride, int ct, int kt) {

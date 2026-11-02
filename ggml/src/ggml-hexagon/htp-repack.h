@@ -66,4 +66,11 @@ static inline bool htp_is_hmx_weight_type(enum ggml_type type) {
 void htp_repack_tensor_tiled(struct ggml_tensor * t, const void * data, size_t size);
 void htp_unpack_tensor_tiled(void * data, const struct ggml_tensor * t, size_t offset, size_t size);
 
+// Range-aware entry points shared with FastRPC/mempool; preserve the dspqueue tiled layout.
+void htp_repack_q4_0_tiled_range(struct ggml_tensor * t, const void * data, size_t offset, size_t size);
+void htp_repack_q4_1_tiled_range(struct ggml_tensor * t, const void * data, size_t offset, size_t size);
+void htp_repack_q8_0_tiled_range(struct ggml_tensor * t, const void * data, size_t offset, size_t size);
+void htp_repack_q4_0_tile_from_blocks(const void * src_blocks, void * dst_tile,
+                                      int64_t ne0, int64_t ne1, int ct, int kt);
+
 #endif // HTP_REPACK_H

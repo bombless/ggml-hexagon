@@ -95,6 +95,7 @@
 #include "htp/ssm-conv.h"
 #include "htp/pool-ops.h"
 #include "htp/cpy-ops.h"
+#include "htp-repack.h"
 #include "htp/concat-ops.h"
 #include "htp/argsort-ops.h"
 #include "htp/im2col-ops.h"
@@ -368,7 +369,18 @@ struct ggml_hexagon_session {
     // QKV fusion: one-shot warning state moved from function-static to ctx member
     bool warned_qkv_name;
 
+    struct set_tensor_type_stats {
+        uint64_t calls = 0;
+        uint64_t bytes = 0;
+        uint64_t total_us = 0;
+        uint64_t max_us = 0;
+        uint64_t partial_calls = 0;
+    };
     uint64_t set_tensor_call_count;
+    std::mutex set_tensor_stats_mutex;
+    std::unordered_map<int, set_tensor_type_stats> set_tensor_stats;
+    bool set_tensor_stats_reported = false;
+    void print_set_tensor_stats();
 
     // Fence slot layout constants for cross-device allreduce.
     // Reserved for future DSP-side allreduce: when enabled, each CDSP
@@ -2614,25 +2626,7 @@ static void repack_q4k_as_q4_0_tiled(ggml_tensor * t, const void * data, size_t 
                 for (int kt = 0; kt < n_k_tiles; kt++) {
                     uint8_t * tile_dst = matrix_dst + (ct * n_k_tiles + kt) * tile_size;
 
-                    uint8_t tile_quants[32][32];
-                    for (int row = 0; row < 32; row++) {
-                        if (kt < nb_q4) {
-                            unpack_q4_0_quants(tile_quants[row], &strip_q4[row * nb_q4 + kt]);
-                        } else {
-                            memset(tile_quants[row], 8, 32);
-                        }
-                    }
-
-                    for (int cp = 0; cp < 16; cp++) {
-                        for (int row = 0; row < 32; row++) {
-                            tile_dst[cp * 32 + row] = (tile_quants[row][2 * cp + 1] << 4) | tile_quants[row][2 * cp];
-                        }
-                    }
-
-                    ggml_half * scale_dst = (ggml_half *)(tile_dst + 512);
-                    for (int row = 0; row < 32; row++) {
-                        scale_dst[row] = (kt < nb_q4) ? strip_q4[row * nb_q4 + kt].d : 0;
-                    }
+                    htp_repack_q4_0_tile_from_blocks(strip_q4.data(), tile_dst, ne0, ne1, ct, kt);
                 }
             }
         }
@@ -2675,25 +2669,7 @@ static void repack_q6k_as_q4_0_tiled(ggml_tensor * t, const void * data, size_t 
                 for (int kt = 0; kt < n_k_tiles; kt++) {
                     uint8_t * tile_dst = matrix_dst + (ct * n_k_tiles + kt) * tile_size;
 
-                    uint8_t tile_quants[32][32];
-                    for (int row = 0; row < 32; row++) {
-                        if (kt < nb_q4) {
-                            unpack_q4_0_quants(tile_quants[row], &strip_q4[row * nb_q4 + kt]);
-                        } else {
-                            memset(tile_quants[row], 8, 32);
-                        }
-                    }
-
-                    for (int cp = 0; cp < 16; cp++) {
-                        for (int row = 0; row < 32; row++) {
-                            tile_dst[cp * 32 + row] = (tile_quants[row][2 * cp + 1] << 4) | tile_quants[row][2 * cp];
-                        }
-                    }
-
-                    ggml_half * scale_dst = (ggml_half *)(tile_dst + 512);
-                    for (int row = 0; row < 32; row++) {
-                        scale_dst[row] = (kt < nb_q4) ? strip_q4[row * nb_q4 + kt].d : 0;
-                    }
+                    htp_repack_q4_0_tile_from_blocks(strip_q4.data(), tile_dst, ne0, ne1, ct, kt);
                 }
             }
         }
@@ -2736,25 +2712,7 @@ static void repack_q5k_as_q4_0_tiled(ggml_tensor * t, const void * data, size_t 
                 for (int kt = 0; kt < n_k_tiles; kt++) {
                     uint8_t * tile_dst = matrix_dst + (ct * n_k_tiles + kt) * tile_size;
 
-                    uint8_t tile_quants[32][32];
-                    for (int row = 0; row < 32; row++) {
-                        if (kt < nb_q4) {
-                            unpack_q4_0_quants(tile_quants[row], &strip_q4[row * nb_q4 + kt]);
-                        } else {
-                            memset(tile_quants[row], 8, 32);
-                        }
-                    }
-
-                    for (int cp = 0; cp < 16; cp++) {
-                        for (int row = 0; row < 32; row++) {
-                            tile_dst[cp * 32 + row] = (tile_quants[row][2 * cp + 1] << 4) | tile_quants[row][2 * cp];
-                        }
-                    }
-
-                    ggml_half * scale_dst = (ggml_half *)(tile_dst + 512);
-                    for (int row = 0; row < 32; row++) {
-                        scale_dst[row] = (kt < nb_q4) ? strip_q4[row * nb_q4 + kt].d : 0;
-                    }
+                    htp_repack_q4_0_tile_from_blocks(strip_q4.data(), tile_dst, ne0, ne1, ct, kt);
                 }
             }
         }
@@ -6864,6 +6822,7 @@ struct ggml_backend_hexagon_buffer_context {
 static void ggml_backend_hexagon_buffer_set_tensor(ggml_backend_buffer_t buffer,
                                                ggml_tensor * tensor, const void * data,
                                                size_t offset, size_t size) {
+    const auto set_tensor_start = std::chrono::steady_clock::now();
     ggml_hexagon_session * hctx        = (ggml_hexagon_session *)buffer->buft->context;
     bool is_repack                             = ggml_backend_buffer_is_hexagon_repack(buffer);
     if (is_repack) {
@@ -6915,7 +6874,7 @@ static void ggml_backend_hexagon_buffer_set_tensor(ggml_backend_buffer_t buffer,
             case GGML_TYPE_IQ4_NL:  // identical block layout to Q4_0
                 if (dp >= base && dp < end) {
                     GGMLHEXAGON_LOG_DEBUG("repack");
-                    repack_q4_0_tiled(tensor, data, offset, size);
+                    htp_repack_q4_0_tiled_range(tensor, data, offset, size);
                 } else {
                     GGMLHEXAGON_LOG_DEBUG("cpu buffer");
                     memcpy(tensor->data, data, size);
@@ -6924,7 +6883,7 @@ static void ggml_backend_hexagon_buffer_set_tensor(ggml_backend_buffer_t buffer,
             case GGML_TYPE_Q4_1:
                 if (dp >= base && dp < end) {
                     GGMLHEXAGON_LOG_DEBUG("repack");
-                    repack_q4_1_tiled(tensor, data, offset, size);
+                    htp_repack_q4_1_tiled_range(tensor, data, offset, size);
                 } else {
                     GGMLHEXAGON_LOG_DEBUG("cpu buffer");
                     memcpy(tensor->data, data, size);
@@ -6933,7 +6892,7 @@ static void ggml_backend_hexagon_buffer_set_tensor(ggml_backend_buffer_t buffer,
             case GGML_TYPE_Q8_0: {
                 if (dp >= base && dp < end) {
                     GGMLHEXAGON_LOG_DEBUG("repack");
-                    repack_q8_0_tiled(tensor, data, offset, size);
+                    htp_repack_q8_0_tiled_range(tensor, data, offset, size);
                 } else {
                     GGMLHEXAGON_LOG_DEBUG("cpu buffer");
                     memcpy(tensor->data, data, size);
@@ -7054,6 +7013,20 @@ static void ggml_backend_hexagon_buffer_set_tensor(ggml_backend_buffer_t buffer,
     auto wm_it = hctx->weight_mirror_cache.find(root->data);
     if (wm_it != hctx->weight_mirror_cache.end()) {
         wm_it->second.dirty = true;
+    }
+
+    const uint64_t elapsed_us = (uint64_t) std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - set_tensor_start).count();
+    {
+        std::lock_guard<std::mutex> lock(hctx->set_tensor_stats_mutex);
+        auto & stats = hctx->set_tensor_stats[(int) tensor->type];
+        stats.calls++;
+        stats.bytes += size;
+        stats.total_us += elapsed_us;
+        stats.max_us = (std::max)(stats.max_us, elapsed_us);
+        if (offset != 0 || size != ggml_nbytes(tensor)) {
+            stats.partial_calls++;
+        }
     }
 }
 
@@ -7714,7 +7687,28 @@ ggml_hexagon_session::ggml_hexagon_session(int dev_id, ggml_backend_dev_t dev)
     }
 }
 
+void ggml_hexagon_session::print_set_tensor_stats() {
+    std::lock_guard<std::mutex> lock(set_tensor_stats_mutex);
+    if (set_tensor_stats_reported) {
+        return;
+    }
+    set_tensor_stats_reported = true;
+    for (const auto & entry : set_tensor_stats) {
+        const auto & stats = entry.second;
+        GGMLHEXAGON_LOG_ALWAYS(
+            "[LOAD-STATS] type=%s calls=%llu bytes=%llu partial_calls=%llu total_us=%llu avg_us=%.1f max_us=%llu",
+            ggml_type_name((enum ggml_type) entry.first),
+            (unsigned long long) stats.calls,
+            (unsigned long long) stats.bytes,
+            (unsigned long long) stats.partial_calls,
+            (unsigned long long) stats.total_us,
+            stats.calls ? (double) stats.total_us / stats.calls : 0.0,
+            (unsigned long long) stats.max_us);
+    }
+}
+
 ggml_hexagon_session::~ggml_hexagon_session() {
+    print_set_tensor_stats();
     ggmlhexagon_deinit_cdsp(this);
     ggmlhexagon_print_running_timestamp(NULL);
 }
@@ -7736,6 +7730,9 @@ static enum ggml_status ggmlhexagon_backend_graph_compute_batch(ggml_backend_t b
     enum ggml_status result             = GGML_STATUS_SUCCESS;
     int64_t begin_time                  = ggml_time_us();
     ggml_hexagon_session * ctx  = (ggml_hexagon_session *)backend->context;
+    // Model weights are fully uploaded before the first graph execution. Emit
+    // the per-type load profile now so it is visible in normal logcat captures.
+    ctx->print_set_tensor_stats();
     int64_t gap_from_prev               = ctx->last_graph_end_us ? (begin_time - ctx->last_graph_end_us) : 0;
     (void)gap_from_prev; // used only in GGMLHEXAGON_LOG_DEBUG
     uint32_t graph_n_nodes              = (uint32_t)cgraph->n_nodes;
