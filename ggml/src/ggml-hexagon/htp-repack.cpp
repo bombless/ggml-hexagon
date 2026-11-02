@@ -660,13 +660,13 @@ void htp_repack_q4_0_tile_from_blocks(const void * src_blocks, void * dst_tile,
         for (int row0 = 0; row0 < 32; row0 += 8) {
             const uint8_t * qs[8];
             for (int rr = 0; rr < 8; ++rr) {
-                const block_q4_0 * block = src + (ct * 32 + row0 + rr) * row_stride + kt;
+                const block_q4_0 * block = src + (row0 + rr) * row_stride + kt;
                 qs[rr] = block->qs;
             }
             repack_neon_4bit_rows(qs, dst, row0);
         }
         for (int row = 0; row < 32; ++row) {
-            scale_dst[row] = src[(ct * 32 + row) * row_stride + kt].d;
+            scale_dst[row] = src[row * row_stride + kt].d;
         }
         return;
     }
@@ -676,7 +676,7 @@ void htp_repack_q4_0_tile_from_blocks(const void * src_blocks, void * dst_tile,
     for (int row = 0; row < 32; ++row) {
         const int64_t r = ct * 32 + row;
         if (r < ne1 && kt < row_stride) {
-            const block_q4_0 & block = src[r * row_stride + kt];
+            const block_q4_0 & block = src[row * row_stride + kt];
             unpack_nibbles_32(tile_quants[row], block.qs);
             scale_dst[row] = block.d;
         } else {

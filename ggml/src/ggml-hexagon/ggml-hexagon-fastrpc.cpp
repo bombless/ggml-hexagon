@@ -1070,7 +1070,8 @@ static void ggmlhexagon_load_cfg() {
     GGMLHEXAGON_LOG_DEBUG("program running start time:%s", time_string);
 #if defined(__ANDROID__)
     // Keep the FastRPC config and DSP skeleton in the project-owned runtime directory.
-    std::filesystem::path cfg_dir("/data/local/ggml-hexagon");
+    const char * runtime_dir = getenv("GGML_HEXAGON_RUNTIME_DIR");
+    std::filesystem::path cfg_dir = (runtime_dir && runtime_dir[0]) ? std::filesystem::path(runtime_dir) : std::filesystem::current_path();
 #else
     std::filesystem::path cfg_dir = std::filesystem::current_path();
 #endif

@@ -70,6 +70,7 @@ void htp_unpack_tensor_tiled(void * data, const struct ggml_tensor * t, size_t o
 void htp_repack_q4_0_tiled_range(struct ggml_tensor * t, const void * data, size_t offset, size_t size);
 void htp_repack_q4_1_tiled_range(struct ggml_tensor * t, const void * data, size_t offset, size_t size);
 void htp_repack_q8_0_tiled_range(struct ggml_tensor * t, const void * data, size_t offset, size_t size);
+// src_blocks points to exactly one 32-row strip; ct is the strip's global tile index.
 void htp_repack_q4_0_tile_from_blocks(const void * src_blocks, void * dst_tile,
                                       int64_t ne0, int64_t ne1, int ct, int kt);
 
