@@ -2066,7 +2066,8 @@ static int ggmlhexagon_init_rpcmempool(ggml_hexagon_session * ctx) {
                                     pool_size, targets[i], ctx->device);
             goto mempool_acquired;
         }
-        GGMLHEXAGON_LOG_DEBUG("init rpc mempool: alloc %zu MiB failed, trying next smaller target", pool_size);
+        GGMLHEXAGON_LOG_WARN("rpcmem_alloc2 returned null: requested=%zu MiB target=%zu MiB device=%d; trying next smaller target",
+                              pool_size, targets[i], ctx->device);
     }
     GGMLHEXAGON_LOG_ERROR("init rpc mempool: all allocation attempts failure");
     return 3;
@@ -2318,8 +2319,10 @@ static int ggmlhexagon_init_dsp(ggml_hexagon_session * ctx) {
             ctx->dsp_thread_counts_max = ctx->dsp_thread_counts;
         }
         ggmlhexagon_set_rpc_latency(ctx->ggmlop_handle, RPC_PM_QOS, 100);
-        if (0 != ggmlhexagon_init_rpcmempool(ctx)) {
-            GGMLHEXAGON_LOG_ERROR("failed to init rpc mempool");
+        const int mempool_result = ggmlhexagon_init_rpcmempool(ctx);
+        if (mempool_result != 0) {
+            GGMLHEXAGON_LOG_ERROR("failed to init rpc mempool: stage_result=%d device=%d domain=%d",
+                                  mempool_result, ctx->device, ctx->domain_id);
             goto bail;
         }
         // Push NPU-side cache optimization bitmask via execute_batch(0xFFFC)
@@ -7778,8 +7781,8 @@ ggml_hexagon_session::ggml_hexagon_session(int dev_id, ggml_backend_dev_t dev)
 
     int result = ggmlhexagon_init_dsp(this);
     if (0 != result) {
-        GGMLHEXAGON_LOG_ERROR("init hexagon dsp failure for device %d", dev_id);
-        throw std::runtime_error("ggml-hexagon: failed to init NPU session");
+        GGMLHEXAGON_LOG_ERROR("init hexagon dsp failure for device %d: init_result=%d", dev_id, result);
+        throw std::runtime_error("ggml-hexagon: failed to init NPU session (init_result=" + std::to_string(result) + ")");
     }
 }
 

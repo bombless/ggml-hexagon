@@ -1244,8 +1244,17 @@ static buft_list_t make_gpu_buft_list(ggml_backend_dev_t dev, llama_split_mode s
         }
     }
 
-    // add the device default buffer type
-    buft_list.emplace_back(dev, ggml_backend_dev_buffer_type(dev));
+    // add the device default buffer type. A backend may fail lazy initialization
+    // while creating this type (e.g. FastRPC session/mempool setup). Do not put
+    // a null type into the list: tensor selection would pass it to
+    // ggml_backend_buft_alloc_buffer(), whose non-null assertion aborts the app.
+    ggml_backend_buffer_type_t default_buft = ggml_backend_dev_buffer_type(dev);
+    if (default_buft == nullptr) {
+        throw std::runtime_error(format(
+            "%s: backend initialization failed while getting the default buffer type for device %s",
+            __func__, ggml_backend_dev_name(dev)));
+    }
+    buft_list.emplace_back(dev, default_buft);
 
     // add the device extra buffer type (if any)
     ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
